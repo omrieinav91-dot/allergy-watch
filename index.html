@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AllergyWatch - מפה משותפת</title>
+    
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-database-compat.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Assistant:wght@400;700&display=swap" rel="stylesheet">
+
+    <style>
+        :root { --primary: #4361ee; --danger: #ef233c; --warning: #ffb703; --dark: #2b2d42; }
+        body, html { margin: 0; padding: 0; font-family: 'Assistant', sans-serif; height: 100vh; display: flex; overflow: hidden; }
+        #map { height: 100vh; width: 100%; flex: 1; z-index: 1; }
+        .sidebar { width: 320px; background: white; z-index: 1000; display: flex; flex-direction: column; box-shadow: 5px 0 15px rgba(0,0,0,0.1); }
+        .sidebar-header { padding: 20px; background: var(--dark); color: white; }
+        .sidebar-content { padding: 15px; flex: 1; overflow-y: auto; }
+        .overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 10000; display: flex; align-items: center; justify-content: center; }
+        .card-box { background: white; padding: 25px; border-radius: 20px; width: 300px; text-align: center; }
+        input { width: 100%; padding: 10px; margin-bottom: 10px; border: 1px solid #ddd; border-radius: 8px; box-sizing: border-box; font-family: inherit; }
+        .btn { width: 100%; padding: 12px; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; }
+        .btn-primary { background: var(--primary); color: white; }
+        .btn-danger { background: var(--danger); color: white; margin-top: 10px; }
+        .btn-delete { background: #ff4d6d; color: white; font-size: 11px; padding: 5px; border-radius: 4px; border: none; cursor: pointer; width: 100%; margin-top: 5px;}
+    </style>
+</head>
+<body>
+
+    <div id="loginOverlay" class="overlay">
+        <div class="card-box">
+            <h2>AllergyWatch</h2>
+            <p>הכנס פרטים כדי להתחבר למפה</p>
+            <input type="email" id="uEmail" placeholder="אימייל">
+            <input type="text" id="uName" placeholder="שם מלא">
+            <button class="btn btn-primary" onclick="handleAuth()">כניסה למערכת</button>
+        </div>
+    </div>
+
+    <div id="setupOverlay" class="overlay" style="display:none;">
+        <div class="card-box">
+            <h3>מה האלרגיה שלך?</h3>
+            <p>הסיכות יהיו אדומות עבור אלרגן זה</p>
+            <input type="text" id="uAllergy" placeholder="למשל: בוטנים">
+            <button class="btn btn-primary" onclick="saveUser()">שמור והתחל</button>
+        </div>
+    </div>
+
+    <div class="sidebar">
+        <div class="sidebar-header">
+            <h3 id="dispName" style="margin:0;">שלום</h3>
+            <div id="dispAllergy" style="font-size:13px; opacity:0.9;"></div>
+        </div>
+        <div class="sidebar-content">
+            <div style="background:#f8f9fa; padding:15px; border-radius:12px; border: 1px solid #eee;">
+                <h4 style="margin-top:0;">דיווח חדש</h4>
+                <input type="text" id="pName" placeholder="שם המקום">
+                <input type="text" id="pAddress" placeholder="כתובת (או לחיצה במפה)">
+                <input type="text" id="dishName" placeholder="שם המנה">
+                <input type="text" id="aType" placeholder="איזה אלרגן יש פה?">
+                <button class="btn btn-danger" onclick="submitReport()">דווח כסכנה ⚠️</button>
+            </div>
+            <p style="font-size: 11px; color: #666; margin-top: 15px; text-align: center;">כל הדיווחים משותפים לכל המשתמשים בזמן אמת.</p>
+        </div>
+    </div>
+
+    <div id="map"></div>
+
+    <script>
+        // הגדרות ה-Firebase שלך - נשארות זהות
+        const firebaseConfig = { databaseURL: "https://allergenwatch-918e8-default-rtdb.europe-west1.firebasedatabase.app/" };
+        firebase.initializeApp(firebaseConfig);
+        const database = firebase.database();
+
+        let map = L.map('map').setView([32.085, 34.781], 15);
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png').addTo(map);
+
+        let currentUser = null;
+        let allReports = [];
+        let blueDotsLayer = L.layerGroup().addTo(map); 
+        let tempCoords = null;
+
+        function handleAuth() {
+            const email = document.getElementById('uEmail').value.replace(/\./g, ',');
+            const name = document.getElementById('uName').value;
+            if(!email || !name) return alert("מלא פרטים");
+            database.ref('users/' + email).once('value', snapshot => {
+                if(snapshot.exists()) { currentUser = snapshot.val(); currentUser.email = email; startApp(); }
+                else { currentUser = { name, email, allergy: "" }; document.getElementById('setupOverlay').style.display='flex'; }
+            });
+        }
+
+        function saveUser() {
+            currentUser.allergy = document.getElementById('uAllergy').value;
+            database.ref('users/' + currentUser.email).set(currentUser);
+            document.getElementById('setupOverlay').style.display = 'none';
+            startApp();
+        }
+
+        function startApp() {
+            document.getElementById('loginOverlay').style.display = 'none';
+            document.getElementById('dispName').innerText = "שלום " + currentUser.name;
+            document.getElementById('dispAllergy').innerText = "אלרגיה שלך: " + currentUser.allergy;
+            listenToReports();
+            map.on('moveend', loadFoodPlaces);
+            loadFoodPlaces();
+        }
+
+        async function loadFoodPlaces() {
+            const b = map.getBounds();
+            const url = `https://overpass-api.de/api/interpreter?data=[out:json];node["amenity"~"restaurant|cafe|fast_food"](${b.getSouth()},${b.getWest()},${b.getNorth()},${b.getEast()});out;`;
+            try {
+                const res = await fetch(url);
+                const data = await res.json();
+                blueDotsLayer.clearLayers();
+                data.elements.forEach(el => {
+                    const hasReport = allReports.some(r => Math.abs(r.lat - el.lat) < 0.0003 && Math.abs(r.lng - el.lon) < 0.0003);
+                    if (!hasReport) {
+                        const dot = L.circleMarker([el.lat, el.lon], {color: 'white', fillColor: '#4cc9f0', fillOpacity: 0.8, radius: 8, weight: 1}).addTo(blueDotsLayer);
+                        dot.on('click', () => {
+                            document.getElementById('pName').value = el.tags.name || "מסעדה";
+                            document.getElementById('pAddress').value = "נבחר מהמפה";
+                            tempCoords = {lat: el.lat, lng: el.lon};
+                        });
+                    }
+                });
+            } catch(e) {}
+        }
+
+        function listenToReports() {
+            database.ref('reports').on('value', snapshot => {
+                allReports = [];
+                map.eachLayer(l => { if(l instanceof L.Marker) map.removeLayer(l); });
+                
+                snapshot.forEach(child => {
+                    const data = child.val();
+                    allReports.push(data);
+                    
+                    // בדיקה: האם האלרגן בסיכה תואם למה שהמשתמש הגדיר לעצמו?
+                    const isMyAllergy = data.allergen.toLowerCase().includes(currentUser.allergy.toLowerCase()) && currentUser.allergy !== "";
+                    const color = isMyAllergy ? 'red' : 'orange';
+                    
+                    const icon = L.icon({
+                        iconUrl: `https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-${color}.png`,
+                        iconSize: [25, 41], iconAnchor: [12, 41]
+                    });
+
+                    L.marker([data.lat, data.lng], {icon}).addTo(map)
+                        .bindPopup(`<b>${data.place}</b><br>מנה: ${data.dish}<br>אלרגן: ${data.allergen}<br><button class="btn-delete" onclick="deleteLoc('${child.key}')">מחק דיווח 🗑️</button>`);
+                });
+                loadFoodPlaces();
+            });
+        }
+
+        function deleteLoc(key) { if(confirm("למחוק את הדיווח מהמפה המשותפת?")) database.ref('reports/' + key).remove(); }
+
+        async function submitReport() {
+            const place = document.getElementById('pName').value;
+            const address = document.getElementById('pAddress').value;
+            const dish = document.getElementById('dishName').value;
+            const allergen = document.getElementById('aType').value;
+            
+            if(!place || !dish || !allergen) return alert("מלא את כל הפרטים");
+
+            let lat, lng;
+            if(tempCoords && address === "נבחר מהמפה") {
+                lat = tempCoords.lat; lng = tempCoords.lng;
+            } else {
+                const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}&limit=1`);
+                const data = await res.json();
+                if(data.length > 0) { lat = data[0].lat; lng = data[0].lon; }
+                else return alert("לא מצאנו את הכתובת הזו במפה");
+            }
+
+            database.ref('reports').push({ place, dish, allergen, lat, lng });
+            alert("דיווח נוסף למפה המשותפת!");
+            document.getElementById('dishName').value = "";
+            document.getElementById('aType').value = "";
+            tempCoords = null;
+        }
+    </script>
+</body>
+</html>
