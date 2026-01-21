@@ -11,16 +11,15 @@
     <style>
         :root { --primary: #ff4d4d; --dark: #2d3436; }
         body, html { margin: 0; padding: 0; height: 100%; font-family: 'Segoe UI', sans-serif; background: #eee; }
-        #map { height: 100vh; width: 100%; z-index: 1; }
+        #map { height: 100vh; width: 100%; z-index: 1; cursor: crosshair; }
         .overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 9999; display: flex; align-items: center; justify-content: center; backdrop-filter: blur(5px); }
         .card { background: white; padding: 30px; border-radius: 20px; text-align: center; width: 320px; }
         .sidebar { position: absolute; top: 20px; right: 20px; width: 280px; background: white; z-index: 1000; padding: 20px; border-radius: 20px; box-shadow: 0 4px 15px rgba(0,0,0,0.15); border-top: 5px solid var(--primary); }
-        input, select { width: 100%; padding: 12px; margin: 8px 0; border: 1px solid #ddd; border-radius: 10px; box-sizing: border-box; }
+        input { width: 100%; padding: 12px; margin: 8px 0; border: 1px solid #ddd; border-radius: 10px; box-sizing: border-box; }
         .btn { width: 100%; padding: 12px; background: var(--dark); color: white; border: none; border-radius: 10px; cursor: pointer; font-weight: bold; }
         .btn-report { background: var(--primary); margin-top: 10px; }
         .user-info { margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px solid #eee; text-align: right; font-size: 14px; }
-        .user-info b { color: var(--primary); }
-        .delete-btn { background: none; border: none; color: red; cursor: pointer; text-decoration: underline; font-size: 12px; margin-top: 5px; }
+        .delete-btn { background: #ff4d4d; color: white; border: none; padding: 5px 10px; border-radius: 5px; cursor: pointer; margin-top: 10px; width: 100%; font-weight: bold; }
     </style>
 </head>
 <body>
@@ -43,17 +42,13 @@
     </div>
 
     <div class="sidebar" id="mainUI" style="display:none;">
-        <div class="user-info">
-            שלום <b id="dispName"></b> | אלרגיה: <b id="dispAllergy"></b>
-        </div>
-        <h3 style="margin:0;">דווח/עדכן מקום</h3>
-        <p style="font-size:11px; color:var(--primary);">* לחץ על המפה או על סיכה קיימת</p>
-        
+        <div class="user-info">שלום <b id="dispName"></b> | אלרגיה: <b id="dispAllergy"></b></div>
+        <h3 style="margin:0;">דווח על מקום</h3>
+        <p style="font-size:11px; color:red;">לחץ על המפה לבחירת מיקום 📍</p>
         <input type="text" id="pName" placeholder="שם המקום">
         <input type="text" id="dishName" placeholder="שם המנה">
-        <input type="text" id="aType" placeholder="איזה אלרגן נמצא?">
-        
-        <button class="btn btn-report" id="reportBtn" onclick="submitReport()">⚠️ דווח כסכנה</button>
+        <input type="text" id="aType" placeholder="איזה אלרגן?">
+        <button class="btn btn-report" onclick="submitReport()">⚠️ דווח סכנה</button>
     </div>
 
     <div id="map"></div>
@@ -68,12 +63,13 @@
 
         let currentUser = null;
         let selectedCoords = null;
+        let tempMarker = null;
 
-        // לחיצה על המפה לקביעת מיקום חדש
+        // לחיצה על המפה לבחירת מיקום
         map.on('click', function(e) {
             selectedCoords = e.latlng;
-            document.getElementById('pName').value = ""; // נותן למשתמש להזין שם
-            alert("בחרת מיקום חדש. הזן את שם המקום והדיווח בצד.");
+            if (tempMarker) map.removeLayer(tempMarker);
+            tempMarker = L.marker(selectedCoords, {opacity: 0.6}).addTo(map);
         });
 
         function handleAuth() {
@@ -103,53 +99,44 @@
 
         function listenToReports() {
             database.ref('reports').on('value', snapshot => {
-                map.eachLayer(l => { if(l instanceof L.Marker) map.removeLayer(l); });
+                map.eachLayer(l => { if(l instanceof L.Marker && l !== tempMarker) map.removeLayer(l); });
                 snapshot.forEach(child => {
                     const data = child.val();
                     const key = child.key;
                     const isMy = data.allergen.toLowerCase().includes(currentUser.allergy.toLowerCase());
                     const color = isMy ? 'red' : 'orange';
-                    
                     const icon = L.icon({
                         iconUrl: `https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-${color}.png`,
                         iconSize: [25, 41], iconAnchor: [12, 41]
                     });
 
-                    const marker = L.marker([data.lat, data.lng], {icon}).addTo(map);
-                    
-                    // כשלוחצים על סיכה קיימת - היא הופכת ל"נקודה הכחולה" שלנו
-                    marker.on('click', function() {
-                        selectedCoords = {lat: data.lat, lng: data.lng};
-                        document.getElementById('pName').value = data.place;
-                        marker.bindPopup(`
-                            <b>${data.place}</b><br>
-                            אלרגן: ${data.allergen}<br>
-                            מנה: ${data.dish || '-'}<br>
-                            <button class="delete-btn" onclick="deleteReport('${key}')">מחק דיווח זה</button>
-                        `).openPopup();
-                    });
+                    L.marker([data.lat, data.lng], {icon}).addTo(map).bindPopup(`
+                        <b>${data.place}</b><br>
+                        אלרגן: ${data.allergen}<br>
+                        מנה: ${data.dish || '-'}<br>
+                        <button class="delete-btn" onclick="deleteReport('${key}')">מחק דיווח</button>
+                    `);
                 });
             });
         }
+
+        window.deleteReport = function(key) {
+            if(confirm("למחוק את הדיווח?")) {
+                database.ref('reports').child(key).remove();
+            }
+        };
 
         function submitReport() {
             const place = document.getElementById('pName').value;
             const allergen = document.getElementById('aType').value;
             const dish = document.getElementById('dishName').value;
-            if(!selectedCoords || !place || !allergen) return alert("לחץ על המפה ומלא שם ואלרגן");
-
+            if(!selectedCoords || !place || !allergen) return alert("לחץ על המפה ומלא פרטים");
             database.ref('reports').push({
-                place, allergen, dish, lat: selectedCoords.lat, lng: selectedCoords.lng, user: currentUser.name
+                place, allergen, dish, lat: selectedCoords.lat, lng: selectedCoords.lng
             });
-            alert("הדיווח נוסף!");
-            document.getElementById('dishName').value = "";
-            document.getElementById('aType').value = "";
-        }
-
-        window.deleteReport = function(key) {
-            if(confirm("בטוח שברצונך למחוק את הדיווח?")) {
-                database.ref('reports').child(key).remove();
-            }
+            if (tempMarker) map.removeLayer(tempMarker);
+            selectedCoords = null;
+            alert("דווח!");
         }
     </script>
 </body>
