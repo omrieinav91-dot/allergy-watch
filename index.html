@@ -25,7 +25,7 @@
         .btn:hover { opacity: 0.9; transform: translateY(-1px); }
         .btn-report { background: var(--primary); margin-top: 10px; display: flex; align-items: center; justify-content: center; gap: 8px; }
         
-        /* עיצוב חדש להתראת חיישן */
+        /* התוספת שלי: עיצוב התראת חיישן */
         #sensorAlert {
             position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
             background: #ff4d4d; color: white; padding: 20px; border-radius: 20px;
@@ -38,14 +38,15 @@
         .user-info span { font-weight: bold; color: var(--primary); }
         .delete-btn { background: #ff4d4d; color: white; border: none; padding: 8px; border-radius: 8px; cursor: pointer; margin-top: 10px; width: 100%; font-weight: bold; }
         .poi-hint { font-size: 11px; color: #3498db; font-weight: bold; text-align: center; margin-bottom: 10px; padding: 5px; background: #eaf6ff; border-radius: 5px; }
+        .leaflet-popup-content-wrapper { border-radius: 15px; }
     </style>
 </head>
 <body>
 
     <div id="sensorAlert">
         <h3 style="color: white; margin: 0;">⚠️ החיישן זיהה סכנה!</h3>
-        <p id="alertText">זוהה אלרגן: <span id="detectedAllergenName" style="font-weight: bold; text-decoration: underline;"></span></p>
-        <input type="text" id="sensorPlaceName" placeholder="שם המקום שבו אתה נמצא" style="color: black;">
+        <p>זוהה אלרגן: <span id="detectedAllergenName" style="font-weight: bold; text-decoration: underline;"></span></p>
+        <input type="text" id="sensorPlaceName" placeholder="שם המקום לדיווח" style="color: black;">
         <button class="btn" style="background: white; color: #ff4d4d; margin-top: 10px;" onclick="submitSensorReport()">דווח עכשיו למפה</button>
         <button style="background:none; border:none; color:white; margin-top:10px; cursor:pointer;" onclick="closeSensorAlert()">התעלם</button>
     </div>
@@ -100,23 +101,21 @@
         let selectedCoords = null;
         let poiLayers = L.layerGroup().addTo(map);
 
-        // --- פונקציית האזנה לחיישן (חדש) ---
+        // --- התוספת שלי: פונקציות החיישן ---
         function listenToSensor() {
-            database.ref('sensor/detected').on('value', snapshot => {
+            const userPath = 'users/' + currentUser.email + '/sensor_detected';
+            database.ref(userPath).on('value', snapshot => {
                 const allergen = snapshot.val();
                 if (allergen && allergen !== "") {
                     document.getElementById('detectedAllergenName').innerText = allergen;
                     document.getElementById('sensorAlert').style.display = 'block';
-                    // אם יש לנו GPS, נשתמש בו, אחרת נשתמש במרכז המפה
-                    navigator.geolocation.getCurrentPosition(pos => {
-                        selectedCoords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-                    });
                 }
             });
         }
 
         function closeSensorAlert() {
-            database.ref('sensor/detected').set(""); // איפוס הנתון ב-Firebase
+            const userPath = 'users/' + currentUser.email + '/sensor_detected';
+            database.ref(userPath).set(""); 
             document.getElementById('sensorAlert').style.display = 'none';
         }
 
@@ -125,23 +124,16 @@
             const allergen = document.getElementById('detectedAllergenName').innerText;
             if(!place) return alert("אנא הזן את שם המקום");
             
-            // שימוש במיקום המפה הנוכחי אם אין GPS
-            const loc = selectedCoords || { lat: map.getCenter().lat, lng: map.getCenter().lng };
-
+            const loc = map.getCenter();
             database.ref('reports').push({
-                place: place,
-                allergen: allergen,
-                dish: "זוהה ע״י חיישן",
-                lat: loc.lat,
-                lng: loc.lng,
-                user: currentUser.name
+                place: place, allergen: allergen, dish: "זוהה ע״י חיישן",
+                lat: loc.lat, lng: loc.lng, user: currentUser.name
             });
-            
             alert("הדיווח נוסף בהצלחה!");
             closeSensorAlert();
         }
 
-        // --- שאר הפונקציות המקוריות שלך ---
+        // --- חזרה לפונקציות המקוריות שלך ללא שינוי ---
         async function fetchFoodPlaces() {
             if (map.getZoom() < 15) { poiLayers.clearLayers(); return; }
             const b = map.getBounds();
@@ -186,7 +178,7 @@
             document.getElementById('dispAllergy').innerText = currentUser.allergy;
             fetchFoodPlaces();
             listenToReports();
-            listenToSensor(); // הפעלת המאזין לחיישן
+            listenToSensor(); // התוספת שלי
         }
 
         function listenToReports() {
@@ -197,14 +189,12 @@
                     const myAllergies = currentUser.allergy.toLowerCase().split(',').map(s => s.trim());
                     const reportAllergen = d.allergen.toLowerCase();
                     const isDanger = myAllergies.some(a => a !== "" && reportAllergen.includes(a));
-                    
                     const color = isDanger ? 'red' : 'orange';
                     const icon = L.icon({
                         iconUrl: `https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-${color}.png`,
                         iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34],
                         shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png', shadowSize: [41, 41]
                     });
-
                     L.marker([d.lat, d.lng], {icon}).addTo(map).bindPopup(`
                         <div style="text-align:right;">
                             <b>${d.place}</b><br>
