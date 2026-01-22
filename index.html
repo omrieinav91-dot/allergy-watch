@@ -34,7 +34,6 @@
 
         .poi-hint { font-size: 11px; color: #3498db; font-weight: bold; text-align: center; margin-bottom: 10px; padding: 5px; background: #eaf6ff; border-radius: 5px; }
         
-        /* עיצוב בועת המידע על המפה */
         .leaflet-popup-content-wrapper { border-radius: 15px; padding: 5px; }
         .leaflet-popup-content { font-family: 'Segoe UI', sans-serif; line-height: 1.5; }
     </style>
@@ -44,7 +43,7 @@
     <div id="loginOverlay" class="overlay">
         <div class="card">
             <h2>AllergyWatch</h2>
-            <p>ברוכים הבאים למערכת הדיווחים</p>
+            <p>התחברות למערכת הדיווחים</p>
             <input type="email" id="uEmail" placeholder="אימייל">
             <input type="text" id="uName" placeholder="שם מלא">
             <button class="btn" onclick="handleAuth()">כניסה</button>
@@ -54,8 +53,7 @@
     <div id="setupOverlay" class="overlay" style="display:none;">
         <div class="card">
             <h3>מה האלרגיה שלך?</h3>
-            <p>כדי שנוכל לסמן לך סכנות באדום</p>
-            <input type="text" id="uAllergy" placeholder="למשל: בוטנים, חלב, גלוטן">
+            <input type="text" id="uAllergy" placeholder="למשל: בוטנים, חלב">
             <button class="btn" onclick="saveUser()">שמור והמשך</button>
         </div>
     </div>
@@ -63,43 +61,37 @@
     <div class="sidebar" id="mainUI" style="display:none;">
         <div class="user-info">
             <div>שלום, <span id="dispName"></span></div>
-            <div style="font-size: 13px; color: #666;">אלרגיה רשומה: <span id="dispAllergy"></span></div>
+            <div style="font-size: 13px; color: #666;">אלרגיה: <span id="dispAllergy"></span></div>
         </div>
         
-        <h3>דיווח על סכנה</h3>
-        <div class="poi-hint">📍 לחץ על עיגול כחול במפה כדי לבחור מסעדה</div>
+        <h3>דיווח חדש</h3>
+        <div class="poi-hint">📍 לחץ על עיגול כחול במפה לבחירת מסעדה</div>
         
         <input type="text" id="pName" placeholder="שם המקום">
         <input type="text" id="dishName" placeholder="שם המנה">
-        <input type="text" id="aType" placeholder="איזה אלרגן נמצא במנה?">
+        <input type="text" id="aType" placeholder="איזה אלרגן נמצא?">
         
         <button class="btn btn-report" onclick="submitReport()">
             <span>⚠️</span> דווח כסכנה
         </button>
-        
-        <p style="font-size: 10px; color: #999; text-align: center; margin-top: 15px;">הדיווח יופיע לכל המשתמשים במפה בזמן אמת</p>
     </div>
 
     <div id="map"></div>
 
     <script>
-        // חיבור ל-Firebase
         const firebaseConfig = { databaseURL: "https://allergenwatch-918e8-default-rtdb.europe-west1.firebasedatabase.app/" };
         firebase.initializeApp(firebaseConfig);
         const database = firebase.database();
 
-        // הגדרת המפה - צבעונית
+        // מפה צבעונית מלאה
         let map = L.map('map', { zoomControl: false }).setView([32.085, 34.781], 16);
         L.control.zoom({ position: 'bottomleft' }).addTo(map);
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            attribution: '&copy; OpenStreetMap'
-        }).addTo(map);
+        L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
 
         let currentUser = null;
         let selectedCoords = null;
         let poiLayers = L.layerGroup().addTo(map);
 
-        // פונקציה למציאת מסעדות (עיגולים כחולים)
         async function fetchFoodPlaces() {
             if (map.getZoom() < 15) { poiLayers.clearLayers(); return; }
             const bounds = map.getBounds();
@@ -111,33 +103,22 @@
                 poiLayers.clearLayers();
                 data.elements.forEach(poi => {
                     const circle = L.circleMarker([poi.lat, poi.lon], {
-                        radius: 10,
-                        color: '#3498db',
-                        fillColor: '#3498db',
-                        fillOpacity: 0.4,
-                        weight: 2
+                        radius: 12, color: '#3498db', fillColor: '#3498db', fillOpacity: 0.5, weight: 3
                     }).addTo(poiLayers);
                     
                     circle.on('click', (e) => {
-                        L.DomEvent.stopPropagation(e);
                         selectedCoords = {lat: poi.lat, lng: poi.lon};
                         document.getElementById('pName').value = poi.tags.name || "מקום ללא שם";
-                        L.popup().setLatLng([poi.lat, poi.lon]).setContent("<b>" + (poi.tags.name || "מסעדה נבחרה") + "</b>").openOn(map);
                     });
                 });
-            } catch (error) {
-                console.error("שגיאה בטעינת מקומות:", error);
-            }
+            } catch (error) {}
         }
 
         map.on('moveend', fetchFoodPlaces);
 
-        // ניהול משתמשים
         function handleAuth() {
             const email = document.getElementById('uEmail').value.trim().replace(/\./g, ',');
             const name = document.getElementById('uName').value.trim();
-            if(!email || !name) return alert("נא למלא אימייל ושם");
-
             database.ref('users/' + email).once('value', snapshot => {
                 if(snapshot.exists()) {
                     currentUser = snapshot.val();
@@ -151,9 +132,7 @@
         }
 
         function saveUser() {
-            const allergy = document.getElementById('uAllergy').value.trim();
-            if(!allergy) return alert("נא להזין אלרגיה");
-            currentUser.allergy = allergy;
+            currentUser.allergy = document.getElementById('uAllergy').value.trim();
             database.ref('users/' + currentUser.email).set(currentUser);
             document.getElementById('setupOverlay').style.display = 'none';
             startApp();
@@ -168,73 +147,47 @@
             listenToReports();
         }
 
-        // האזנה לדיווחים והצגת סיכות
         function listenToReports() {
             database.ref('reports').on('value', snapshot => {
-                // מנקה סיכות קיימות (לא את העיגולים הכחולים)
                 map.eachLayer(l => { if(l instanceof L.Marker) map.removeLayer(l); });
-                
                 snapshot.forEach(child => {
-                    const data = child.val();
+                    const d = child.val();
                     const key = child.key;
                     
-                    // בדיקה אם הדיווח הוא על האלרגיה של המשתמש
-                    const isDangerousForMe = data.allergen.toLowerCase().includes(currentUser.allergy.toLowerCase()) && currentUser.allergy !== "";
-                    const markerColor = isDangerousForMe ? 'red' : 'orange';
+                    // בדיקה קפדנית לצבע אדום
+                    const myAllergy = currentUser.allergy.toLowerCase();
+                    const reportAllergen = d.allergen.toLowerCase();
+                    const isDanger = reportAllergen.includes(myAllergy) && myAllergy !== "";
                     
+                    const markerColor = isDanger ? 'red' : 'orange';
                     const icon = L.icon({
                         iconUrl: `https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-${markerColor}.png`,
-                        shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
-                        iconSize: [25, 41],
-                        iconAnchor: [12, 41],
-                        popupAnchor: [1, -34],
-                        shadowSize: [41, 41]
+                        iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png', shadowSize: [41, 41]
                     });
 
-                    L.marker([data.lat, data.lng], {icon}).addTo(map).bindPopup(`
-                        <div style="text-align:right; min-width:150px;">
-                            <b style="font-size:16px; color:#2d3436;">${data.place}</b><br>
-                            <b>מנה:</b> ${data.dish || 'לא צוין'}<br>
-                            <b>אלרגן:</b> <span style="color:red; font-weight:bold;">${data.allergen}</span><br>
-                            <div style="font-size:11px; color:#666; margin-top:5px;">דווח על ידי: ${data.user || 'משתמש'}</div>
-                            <button class="delete-btn" onclick="deleteReport('${key}')">מחק דיווח</button>
+                    L.marker([d.lat, d.lng], {icon}).addTo(map).bindPopup(`
+                        <div style="text-align:right;">
+                            <b>${d.place}</b><br>
+                            מנה: ${d.dish || '-'}<br>
+                            אלרגן: <span style="color:red;font-weight:bold;">${d.allergen}</span><br>
+                            <button class="delete-btn" onclick="deleteReport('${key}')">מחק</button>
                         </div>
                     `);
                 });
             });
         }
 
-        window.deleteReport = (key) => {
-            if(confirm("האם אתה בטוח שברצונך למחוק את הדיווח הזה מהמפה?")) {
-                database.ref('reports').child(key).remove();
-            }
-        };
+        window.deleteReport = (key) => { if(confirm("למחוק?")) database.ref('reports').child(key).remove(); };
 
         function submitReport() {
-            const place = document.getElementById('pName').value.trim();
-            const allergen = document.getElementById('aType').value.trim();
-            const dish = document.getElementById('dishName').value.trim();
-            
-            if(!selectedCoords || !place || !allergen) {
-                return alert("חובה לבחור מיקום מהמפה (עיגול כחול) ולמלא שם מקום ואלרגן");
-            }
-
+            const place = document.getElementById('pName').value;
+            const allergen = document.getElementById('aType').value;
+            if(!selectedCoords || !place || !allergen) return alert("בחר עיגול כחול ומלא פרטים");
             database.ref('reports').push({
-                place,
-                allergen,
-                dish,
-                lat: selectedCoords.lat,
-                lng: selectedCoords.lng,
-                user: currentUser.name,
-                timestamp: Date.now()
+                place, allergen, dish: document.getElementById('dishName').value,
+                lat: selectedCoords.lat, lng: selectedCoords.lng, user: currentUser.name
             });
-
-            alert("הדיווח נשלח ונוסף למפה!");
-            // איפוס שדות
-            document.getElementById('pName').value = "";
-            document.getElementById('dishName').value = "";
-            document.getElementById('aType').value = "";
-            selectedCoords = null;
+            alert("דווח!");
         }
     </script>
 </body>
