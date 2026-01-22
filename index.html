@@ -20,6 +20,9 @@
         .btn-report { background: var(--primary); margin-top: 10px; }
         .user-info { margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px solid #eee; text-align: right; font-size: 14px; }
         .delete-btn { background: #ff4d4d; color: white; border: none; padding: 5px 10px; border-radius: 5px; cursor: pointer; margin-top: 10px; width: 100%; font-weight: bold; }
+        .search-container { margin-bottom: 15px; display: flex; gap: 5px; }
+        .search-container input { margin: 0; }
+        .search-container button { width: auto; padding: 10px; }
     </style>
 </head>
 <body>
@@ -43,11 +46,19 @@
 
     <div class="sidebar" id="mainUI" style="display:none;">
         <div class="user-info">שלום <b id="dispName"></b> | אלרגיה: <b id="dispAllergy"></b></div>
+        
+        <div class="search-container">
+            <input type="text" id="addressSearch" placeholder="חפש עיר ורחוב...">
+            <button class="btn" onclick="searchAddress()">📍</button>
+        </div>
+
         <h3 style="margin:0;">דווח על מקום</h3>
-        <p style="font-size:11px; color:red;">לחץ על המפה לבחירת מיקום 📍</p>
+        <p style="font-size:11px; color:red;">לחץ על המפה או חפש כתובת 📍</p>
+        
         <input type="text" id="pName" placeholder="שם המקום">
         <input type="text" id="dishName" placeholder="שם המנה">
         <input type="text" id="aType" placeholder="איזה אלרגן?">
+        
         <button class="btn btn-report" onclick="submitReport()">⚠️ דווח סכנה</button>
     </div>
 
@@ -59,18 +70,48 @@
         const database = firebase.database();
 
         let map = L.map('map').setView([32.085, 34.781], 14);
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png').addTo(map);
+        
+        // שימוש במפה עם נקודות עניין (POI) ברורות יותר
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
 
         let currentUser = null;
         let selectedCoords = null;
         let tempMarker = null;
 
-        // לחיצה על המפה לבחירת מיקום
-        map.on('click', function(e) {
-            selectedCoords = e.latlng;
-            if (tempMarker) map.removeLayer(tempMarker);
-            tempMarker = L.marker(selectedCoords, {opacity: 0.6}).addTo(map);
+        // חיפוש כתובת והזזת המפה
+        async function searchAddress() {
+            const query = document.getElementById('addressSearch').value;
+            if(!query) return;
+            const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${query}&countrycodes=il`);
+            const data = await res.json();
+            if(data.length > 0) {
+                const loc = data[0];
+                map.setView([loc.lat, loc.lon], 18);
+                updateSelectedLocation(loc.lat, loc.lon, loc.display_name.split(',')[0]);
+            } else {
+                alert("כתובת לא נמצאה");
+            }
+        }
+
+        // לחיצה על המפה וזיהוי אוטומטי של העסק
+        map.on('click', async function(e) {
+            const lat = e.latlng.lat;
+            const lng = e.latlng.lng;
+            
+            // "שואב" את שם המקום עליו לחצת
+            const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}`);
+            const data = await res.json();
+            const placeName = data.address.amenity || data.address.shop || data.address.restaurant || "";
+            
+            updateSelectedLocation(lat, lng, placeName);
         });
+
+        function updateSelectedLocation(lat, lng, name) {
+            selectedCoords = {lat, lng};
+            if (tempMarker) map.removeLayer(tempMarker);
+            tempMarker = L.marker([lat, lng], {opacity: 0.7}).addTo(map);
+            if(name) document.getElementById('pName').value = name;
+        }
 
         function handleAuth() {
             const email = document.getElementById('uEmail').value.replace(/\./g, ',');
@@ -130,13 +171,14 @@
             const place = document.getElementById('pName').value;
             const allergen = document.getElementById('aType').value;
             const dish = document.getElementById('dishName').value;
-            if(!selectedCoords || !place || !allergen) return alert("לחץ על המפה ומלא פרטים");
+            if(!selectedCoords || !place || !allergen) return alert("בחר מקום ומלא פרטים");
             database.ref('reports').push({
                 place, allergen, dish, lat: selectedCoords.lat, lng: selectedCoords.lng
             });
             if (tempMarker) map.removeLayer(tempMarker);
             selectedCoords = null;
-            alert("דווח!");
+            document.getElementById('pName').value = "";
+            alert("דווח בהצלחה!");
         }
     </script>
 </body>
