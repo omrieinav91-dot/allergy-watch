@@ -10,19 +10,23 @@
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-database-compat.js"></script>
     <style>
         :root { --primary: #ff4d4d; --dark: #2d3436; }
-        body, html { margin: 0; padding: 0; height: 100%; font-family: 'Segoe UI', sans-serif; background: #eee; }
-        #map { height: 100vh; width: 100%; z-index: 1; cursor: crosshair; }
+        body, html { margin: 0; padding: 0; height: 100%; font-family: 'Segoe UI', sans-serif; background: #eee; overflow: hidden; }
+        #map { height: 100vh; width: 100%; z-index: 1; }
+        
         .overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 9999; display: flex; align-items: center; justify-content: center; backdrop-filter: blur(5px); }
-        .card { background: white; padding: 30px; border-radius: 20px; text-align: center; width: 320px; }
-        .sidebar { position: absolute; top: 20px; right: 20px; width: 280px; background: white; z-index: 1000; padding: 20px; border-radius: 20px; box-shadow: 0 4px 15px rgba(0,0,0,0.15); border-top: 5px solid var(--primary); }
-        input { width: 100%; padding: 12px; margin: 8px 0; border: 1px solid #ddd; border-radius: 10px; box-sizing: border-box; }
-        .btn { width: 100%; padding: 12px; background: var(--dark); color: white; border: none; border-radius: 10px; cursor: pointer; font-weight: bold; }
+        .card { background: white; padding: 30px; border-radius: 20px; text-align: center; width: 320px; box-shadow: 0 10px 25px rgba(0,0,0,0.2); }
+        
+        .sidebar { position: absolute; top: 20px; right: 20px; width: 280px; background: white; z-index: 1000; padding: 20px; border-radius: 20px; box-shadow: 0 4px 15px rgba(0,0,0,0.15); border-top: 5px solid var(--primary); max-height: 85vh; overflow-y: auto; }
+        
+        input, select { width: 100%; padding: 12px; margin: 8px 0; border: 1px solid #ddd; border-radius: 10px; box-sizing: border-box; font-size: 15px; }
+        .btn { width: 100%; padding: 12px; background: var(--dark); color: white; border: none; border-radius: 10px; cursor: pointer; font-weight: bold; font-size: 16px; }
         .btn-report { background: var(--primary); margin-top: 10px; }
-        .user-info { margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px solid #eee; text-align: right; font-size: 14px; }
-        .delete-btn { background: #ff4d4d; color: white; border: none; padding: 5px 10px; border-radius: 5px; cursor: pointer; margin-top: 10px; width: 100%; font-weight: bold; }
-        .search-container { margin-bottom: 15px; display: flex; gap: 5px; }
-        .search-container input { margin: 0; }
-        .search-container button { width: auto; padding: 10px; }
+        
+        .user-info { margin-bottom: 15px; padding-bottom: 15px; border-bottom: 1px solid #eee; text-align: right; font-size: 14px; }
+        .user-info b { color: var(--primary); }
+        .delete-btn { background: #ff4d4d; color: white; border: none; padding: 8px; border-radius: 8px; cursor: pointer; margin-top: 10px; width: 100%; font-weight: bold; }
+        
+        .poi-hint { font-size: 11px; color: #3498db; font-weight: bold; text-align: center; margin-bottom: 10px; }
     </style>
 </head>
 <body>
@@ -39,27 +43,24 @@
     <div id="setupOverlay" class="overlay" style="display:none;">
         <div class="card">
             <h3>מה האלרגיה שלך?</h3>
-            <input type="text" id="uAllergy" placeholder="למשל: בוטנים">
-            <button class="btn" onclick="saveUser()">שמור</button>
+            <input type="text" id="uAllergy" placeholder="למשל: בוטנים, חלב">
+            <button class="btn" onclick="saveUser()">שמור והמשך</button>
         </div>
     </div>
 
     <div class="sidebar" id="mainUI" style="display:none;">
-        <div class="user-info">שלום <b id="dispName"></b> | אלרגיה: <b id="dispAllergy"></b></div>
-        
-        <div class="search-container">
-            <input type="text" id="addressSearch" placeholder="חפש עיר ורחוב...">
-            <button class="btn" onclick="searchAddress()">📍</button>
+        <div class="user-info">
+            <div>שלום <b id="dispName"></b></div>
+            <div>אלרגיה: <b id="dispAllergy"></b></div>
         </div>
-
-        <h3 style="margin:0;">דווח על מקום</h3>
-        <p style="font-size:11px; color:red;">לחץ על המפה או חפש כתובת 📍</p>
+        
+        <div class="poi-hint">לחץ על עיגול כחול לבחירת מקום אוכל 🍴</div>
         
         <input type="text" id="pName" placeholder="שם המקום">
-        <input type="text" id="dishName" placeholder="שם המנה">
-        <input type="text" id="aType" placeholder="איזה אלרגן?">
+        <input type="text" id="dishName" placeholder="שם המנה (אופציונלי)">
+        <input type="text" id="aType" placeholder="איזה אלרגן נמצא?">
         
-        <button class="btn btn-report" onclick="submitReport()">⚠️ דווח סכנה</button>
+        <button class="btn btn-report" onclick="submitReport()">⚠️ דווח כסכנה</button>
     </div>
 
     <div id="map"></div>
@@ -69,62 +70,60 @@
         firebase.initializeApp(firebaseConfig);
         const database = firebase.database();
 
-        let map = L.map('map').setView([32.085, 34.781], 14);
-        
-        // שימוש במפה עם נקודות עניין (POI) ברורות יותר
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+        let map = L.map('map', { zoomControl: false }).setView([32.085, 34.781], 16);
+        L.control.zoom({ position: 'bottomleft' }).addTo(map);
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png').addTo(map);
 
         let currentUser = null;
         let selectedCoords = null;
-        let tempMarker = null;
+        let poiLayers = L.layerGroup().addTo(map);
 
-        // חיפוש כתובת והזזת המפה
-        async function searchAddress() {
-            const query = document.getElementById('addressSearch').value;
-            if(!query) return;
-            const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${query}&countrycodes=il`);
-            const data = await res.json();
-            if(data.length > 0) {
-                const loc = data[0];
-                map.setView([loc.lat, loc.lon], 18);
-                updateSelectedLocation(loc.lat, loc.lon, loc.display_name.split(',')[0]);
-            } else {
-                alert("כתובת לא נמצאה");
-            }
+        // משיכת מקומות אוכל מהמפה
+        async function fetchFoodPlaces() {
+            if (map.getZoom() < 15) { poiLayers.clearLayers(); return; }
+            const b = map.getBounds();
+            const query = `[out:json];node["amenity"~"restaurant|cafe|fast_food|food_court"](${b.getSouth()},${b.getWest()},${b.getNorth()},${b.getEast()});out;`;
+            
+            try {
+                const res = await fetch('https://overpass-api.de/api/interpreter?data=' + encodeURIComponent(query));
+                const data = await res.json();
+                poiLayers.clearLayers();
+                data.elements.forEach(poi => {
+                    const circle = L.circleMarker([poi.lat, poi.lon], {
+                        radius: 9, color: '#3498db', fillColor: '#3498db', fillOpacity: 0.5, weight: 2
+                    }).addTo(poiLayers);
+                    
+                    circle.on('click', () => {
+                        selectedCoords = {lat: poi.lat, lng: poi.lon};
+                        document.getElementById('pName').value = poi.tags.name || "מקום לא ידוע";
+                        L.popup().setLatLng([poi.lat, poi.lon]).setContent("<b>" + (poi.tags.name || "נבחר") + "</b><br>מלא פרטים בדיווח").openOn(map);
+                    });
+                });
+            } catch (e) { console.error("POI Error"); }
         }
 
-        // לחיצה על המפה וזיהוי אוטומטי של העסק
-        map.on('click', async function(e) {
-            const lat = e.latlng.lat;
-            const lng = e.latlng.lng;
-            
-            // "שואב" את שם המקום עליו לחצת
-            const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}`);
-            const data = await res.json();
-            const placeName = data.address.amenity || data.address.shop || data.address.restaurant || "";
-            
-            updateSelectedLocation(lat, lng, placeName);
-        });
-
-        function updateSelectedLocation(lat, lng, name) {
-            selectedCoords = {lat, lng};
-            if (tempMarker) map.removeLayer(tempMarker);
-            tempMarker = L.marker([lat, lng], {opacity: 0.7}).addTo(map);
-            if(name) document.getElementById('pName').value = name;
-        }
+        map.on('moveend', fetchFoodPlaces);
 
         function handleAuth() {
             const email = document.getElementById('uEmail').value.replace(/\./g, ',');
             const name = document.getElementById('uName').value;
             if(!email || !name) return alert("מלא פרטים");
             database.ref('users/' + email).once('value', snapshot => {
-                if(snapshot.exists()) { currentUser = snapshot.val(); currentUser.email = email; startApp(); }
-                else { currentUser = { name, email, allergy: "" }; document.getElementById('setupOverlay').style.display = 'flex'; }
+                if(snapshot.exists()) { 
+                    currentUser = snapshot.val(); 
+                    currentUser.email = email; 
+                    startApp(); 
+                } else { 
+                    currentUser = { name, email, allergy: "" }; 
+                    document.getElementById('setupOverlay').style.display = 'flex'; 
+                }
             });
         }
 
         function saveUser() {
-            currentUser.allergy = document.getElementById('uAllergy').value;
+            const al = document.getElementById('uAllergy').value;
+            if(!al) return alert("ציין אלרגיה");
+            currentUser.allergy = al;
             database.ref('users/' + currentUser.email).set(currentUser);
             document.getElementById('setupOverlay').style.display = 'none';
             startApp();
@@ -135,50 +134,56 @@
             document.getElementById('mainUI').style.display = 'block';
             document.getElementById('dispName').innerText = currentUser.name;
             document.getElementById('dispAllergy').innerText = currentUser.allergy;
+            fetchFoodPlaces();
             listenToReports();
         }
 
         function listenToReports() {
             database.ref('reports').on('value', snapshot => {
-                map.eachLayer(l => { if(l instanceof L.Marker && l !== tempMarker) map.removeLayer(l); });
+                map.eachLayer(l => { if(l instanceof L.Marker) map.removeLayer(l); });
                 snapshot.forEach(child => {
-                    const data = child.val();
+                    const d = child.val();
                     const key = child.key;
-                    const isMy = data.allergen.toLowerCase().includes(currentUser.allergy.toLowerCase());
+                    const isMy = d.allergen.toLowerCase().includes(currentUser.allergy.toLowerCase()) && currentUser.allergy !== "";
                     const color = isMy ? 'red' : 'orange';
                     const icon = L.icon({
                         iconUrl: `https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-${color}.png`,
                         iconSize: [25, 41], iconAnchor: [12, 41]
                     });
-
-                    L.marker([data.lat, data.lng], {icon}).addTo(map).bindPopup(`
-                        <b>${data.place}</b><br>
-                        אלרגן: ${data.allergen}<br>
-                        מנה: ${data.dish || '-'}<br>
-                        <button class="delete-btn" onclick="deleteReport('${key}')">מחק דיווח</button>
+                    
+                    L.marker([d.lat, d.lng], {icon}).addTo(map).bindPopup(`
+                        <div style="text-align:right;">
+                            <b>${d.place}</b><br>
+                            מנה: ${d.dish || '-'}<br>
+                            אלרגן: <span style="color:red;">${d.allergen}</span><br>
+                            <small>דווח ע"י: ${d.user || 'אנונימי'}</small>
+                            <button class="delete-btn" onclick="deleteReport('${key}')">מחק דיווח</button>
+                        </div>
                     `);
                 });
             });
         }
 
-        window.deleteReport = function(key) {
-            if(confirm("למחוק את הדיווח?")) {
+        window.deleteReport = (key) => {
+            if(confirm("למחוק את הדיווח הזה?")) {
                 database.ref('reports').child(key).remove();
             }
         };
 
         function submitReport() {
-            const place = document.getElementById('pName').value;
-            const allergen = document.getElementById('aType').value;
-            const dish = document.getElementById('dishName').value;
-            if(!selectedCoords || !place || !allergen) return alert("בחר מקום ומלא פרטים");
+            const p = document.getElementById('pName').value;
+            const a = document.getElementById('aType').value;
+            const d = document.getElementById('dishName').value;
+            if(!selectedCoords || !p || !a) return alert("בחר עיגול כחול ומלא שם ואלרגן");
+            
             database.ref('reports').push({
-                place, allergen, dish, lat: selectedCoords.lat, lng: selectedCoords.lng
+                place: p, allergen: a, dish: d, lat: selectedCoords.lat, lng: selectedCoords.lng, user: currentUser.name
             });
-            if (tempMarker) map.removeLayer(tempMarker);
-            selectedCoords = null;
+            
+            alert("הדיווח נשמר!");
             document.getElementById('pName').value = "";
-            alert("דווח בהצלחה!");
+            document.getElementById('aType').value = "";
+            document.getElementById('dishName').value = "";
         }
     </script>
 </body>
