@@ -19,7 +19,7 @@
         .sidebar { position: absolute; top: 20px; right: 20px; width: 300px; background: white; z-index: 1000; padding: 20px; border-radius: 20px; box-shadow: 0 4px 15px rgba(0,0,0,0.15); border-top: 5px solid var(--primary); max-height: 90vh; overflow-y: auto; }
         
         h2, h3 { color: var(--dark); margin: 0 0 15px 0; }
-        input, select { width: 100%; padding: 12px; margin: 8px 0; border: 1px solid #ddd; border-radius: 10px; box-sizing: border-box; font-size: 16px; }
+        input { width: 100%; padding: 12px; margin: 8px 0; border: 1px solid #ddd; border-radius: 10px; box-sizing: border-box; font-size: 16px; }
         
         .btn { width: 100%; padding: 12px; background: var(--dark); color: white; border: none; border-radius: 10px; cursor: pointer; font-weight: bold; font-size: 16px; transition: 0.2s; }
         .btn:hover { opacity: 0.9; transform: translateY(-1px); }
@@ -29,13 +29,11 @@
         .user-info div { margin-bottom: 5px; }
         .user-info span { font-weight: bold; color: var(--primary); }
         
-        .delete-btn { background: #ff4d4d; color: white; border: none; padding: 8px; border-radius: 8px; cursor: pointer; margin-top: 10px; width: 100%; font-weight: bold; transition: 0.2s; }
-        .delete-btn:hover { background: #cc0000; }
+        .delete-btn { background: #ff4d4d; color: white; border: none; padding: 8px; border-radius: 8px; cursor: pointer; margin-top: 10px; width: 100%; font-weight: bold; }
 
         .poi-hint { font-size: 11px; color: #3498db; font-weight: bold; text-align: center; margin-bottom: 10px; padding: 5px; background: #eaf6ff; border-radius: 5px; }
         
-        .leaflet-popup-content-wrapper { border-radius: 15px; padding: 5px; }
-        .leaflet-popup-content { font-family: 'Segoe UI', sans-serif; line-height: 1.5; }
+        .leaflet-popup-content-wrapper { border-radius: 15px; }
     </style>
 </head>
 <body>
@@ -43,7 +41,6 @@
     <div id="loginOverlay" class="overlay">
         <div class="card">
             <h2>AllergyWatch</h2>
-            <p>התחברות למערכת הדיווחים</p>
             <input type="email" id="uEmail" placeholder="אימייל">
             <input type="text" id="uName" placeholder="שם מלא">
             <button class="btn" onclick="handleAuth()">כניסה</button>
@@ -53,7 +50,7 @@
     <div id="setupOverlay" class="overlay" style="display:none;">
         <div class="card">
             <h3>מה האלרגיה שלך?</h3>
-            <input type="text" id="uAllergy" placeholder="למשל: בוטנים, חלב">
+            <input type="text" id="uAllergy" placeholder="למשל: בוטנים, שומשום">
             <button class="btn" onclick="saveUser()">שמור והמשך</button>
         </div>
     </div>
@@ -83,10 +80,10 @@
         firebase.initializeApp(firebaseConfig);
         const database = firebase.database();
 
-        // מפה צבעונית מלאה
         let map = L.map('map', { zoomControl: false }).setView([32.085, 34.781], 16);
         L.control.zoom({ position: 'bottomleft' }).addTo(map);
-        L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+        // מפה צבעונית
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
 
         let currentUser = null;
         let selectedCoords = null;
@@ -94,40 +91,31 @@
 
         async function fetchFoodPlaces() {
             if (map.getZoom() < 15) { poiLayers.clearLayers(); return; }
-            const bounds = map.getBounds();
-            const query = `[out:json];node["amenity"~"restaurant|cafe|fast_food|food_court"](${bounds.getSouth()},${bounds.getWest()},${bounds.getNorth()},${bounds.getEast()});out;`;
-            
+            const b = map.getBounds();
+            const query = `[out:json];node["amenity"~"restaurant|cafe|fast_food"](${b.getSouth()},${b.getWest()},${b.getNorth()},${b.getEast()});out;`;
             try {
-                const response = await fetch('https://overpass-api.de/api/interpreter?data=' + encodeURIComponent(query));
-                const data = await response.json();
+                const res = await fetch('https://overpass-api.de/api/interpreter?data=' + encodeURIComponent(query));
+                const data = await res.json();
                 poiLayers.clearLayers();
                 data.elements.forEach(poi => {
                     const circle = L.circleMarker([poi.lat, poi.lon], {
                         radius: 12, color: '#3498db', fillColor: '#3498db', fillOpacity: 0.5, weight: 3
                     }).addTo(poiLayers);
-                    
-                    circle.on('click', (e) => {
+                    circle.on('click', () => {
                         selectedCoords = {lat: poi.lat, lng: poi.lon};
                         document.getElementById('pName').value = poi.tags.name || "מקום ללא שם";
                     });
                 });
-            } catch (error) {}
+            } catch (e) {}
         }
-
         map.on('moveend', fetchFoodPlaces);
 
         function handleAuth() {
             const email = document.getElementById('uEmail').value.trim().replace(/\./g, ',');
             const name = document.getElementById('uName').value.trim();
-            database.ref('users/' + email).once('value', snapshot => {
-                if(snapshot.exists()) {
-                    currentUser = snapshot.val();
-                    currentUser.email = email;
-                    startApp();
-                } else {
-                    currentUser = { name, email, allergy: "" };
-                    document.getElementById('setupOverlay').style.display = 'flex';
-                }
+            database.ref('users/' + email).once('value', s => {
+                if(s.exists()) { currentUser = s.val(); currentUser.email = email; startApp(); }
+                else { currentUser = { name, email, allergy: "" }; document.getElementById('setupOverlay').style.display = 'flex'; }
             });
         }
 
@@ -152,17 +140,17 @@
                 map.eachLayer(l => { if(l instanceof L.Marker) map.removeLayer(l); });
                 snapshot.forEach(child => {
                     const d = child.val();
-                    const key = child.key;
                     
-                    // בדיקה קפדנית לצבע אדום
-                    const myAllergy = currentUser.allergy.toLowerCase();
+                    // תיקון צבע סיכה: בודק אם אחת מהאלרגיות של המשתמש מופיעה בדיווח
+                    const myAllergies = currentUser.allergy.toLowerCase().split(',').map(s => s.trim());
                     const reportAllergen = d.allergen.toLowerCase();
-                    const isDanger = reportAllergen.includes(myAllergy) && myAllergy !== "";
+                    const isDanger = myAllergies.some(a => a !== "" && reportAllergen.includes(a));
                     
-                    const markerColor = isDanger ? 'red' : 'orange';
+                    const color = isDanger ? 'red' : 'orange';
                     const icon = L.icon({
-                        iconUrl: `https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-${markerColor}.png`,
-                        iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png', shadowSize: [41, 41]
+                        iconUrl: `https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-${color}.png`,
+                        iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34],
+                        shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png', shadowSize: [41, 41]
                     });
 
                     L.marker([d.lat, d.lng], {icon}).addTo(map).bindPopup(`
@@ -170,24 +158,24 @@
                             <b>${d.place}</b><br>
                             מנה: ${d.dish || '-'}<br>
                             אלרגן: <span style="color:red;font-weight:bold;">${d.allergen}</span><br>
-                            <button class="delete-btn" onclick="deleteReport('${key}')">מחק</button>
+                            <button class="delete-btn" onclick="deleteReport('${child.key}')">מחק</button>
                         </div>
                     `);
                 });
             });
         }
 
-        window.deleteReport = (key) => { if(confirm("למחוק?")) database.ref('reports').child(key).remove(); };
+        window.deleteReport = (key) => { if(confirm("למחוק דיווח?")) database.ref('reports').child(key).remove(); };
 
         function submitReport() {
-            const place = document.getElementById('pName').value;
-            const allergen = document.getElementById('aType').value;
-            if(!selectedCoords || !place || !allergen) return alert("בחר עיגול כחול ומלא פרטים");
+            const p = document.getElementById('pName').value;
+            const a = document.getElementById('aType').value;
+            if(!selectedCoords || !p || !a) return alert("בחר עיגול כחול ומלא פרטים");
             database.ref('reports').push({
-                place, allergen, dish: document.getElementById('dishName').value,
+                place: p, allergen: a, dish: document.getElementById('dishName').value,
                 lat: selectedCoords.lat, lng: selectedCoords.lng, user: currentUser.name
             });
-            alert("דווח!");
+            alert("דווח בהצלחה!");
         }
     </script>
 </body>
